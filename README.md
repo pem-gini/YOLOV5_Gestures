@@ -4,6 +4,14 @@
 
 本期我们带来的内容是基于YOLOV5的手势识别系统，我们将会训练得到能识别10种常用手势的模型，废话不多说，还是先看效果。
 
+> B站视频：[毕设系列-检测专题-基于YOLOV5的手势识别系统_哔哩哔哩_bilibili](https://www.bilibili.com/video/BV193411578r/)
+>
+> 博客地址：https://blog.csdn.net/ECHOSON/article/details/123293028
+>
+> 代码地址：[YOLOV5-hand-42: 基于YOLOV5的手势识别系统 (gitee.com)](https://gitee.com/song-laogou/yolov5-hand-42)
+>
+> 数据集和训练好的模型地址：[ YOLOV5手势识别数据集+代码+模型2000张标注好的数据+教学视频-深度学习文档类资源-CSDN文库](https://download.csdn.net/download/ECHOSON/83460039)
+
 ![image-20220305112626887](https://vehicle4cm.oss-cn-beijing.aliyuncs.com/typoraimgs/image-20220305112626887.png)
 
 ![image-20220305112644529](https://vehicle4cm.oss-cn-beijing.aliyuncs.com/typoraimgs/image-20220305112644529.png)
@@ -16,9 +24,9 @@
 
 ## 下载代码
 
-代码的下载地址是：
+代码的下载地址是：[YOLOV5-hand-42: 基于YOLOV5的手势识别系统 (gitee.com)](https://gitee.com/song-laogou/yolov5-hand-42)
 
-
+![image-20220305143233902](https://vehicle4cm.oss-cn-beijing.aliyuncs.com/typoraimgs/image-20220305143233902.png)
 
 ## 配置环境
 
