@@ -8,7 +8,9 @@ models/__pycache__/
 pretrained/
 runs/
 utils/__pycache__/
+ utils/loggers/wandb/__pycache__/
 stop_gesture.mp4
 OAK_CAM.py
 yolov5s.pt
 *.log
+*.pyc

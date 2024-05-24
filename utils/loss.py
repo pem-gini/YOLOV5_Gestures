@@ -5,6 +5,7 @@ Loss functions
 
 import torch
 import torch.nn as nn
+import numpy as np
 
 from utils.metrics import bbox_iou
 from utils.torch_utils import is_parallel
@@ -214,7 +215,9 @@ class ComputeLoss:
 
             # Append
             a = t[:, 6].long()  # anchor indices
-            indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices
+            tensor_zero_cuda = torch.tensor(0).to('cuda:0')  ##change
+            #indices.append((b, a, gj.clamp_(0, gain[3] - 1), gi.clamp_(0, gain[2] - 1)))  # image, anchor, grid indices，##change
+            indices.append((b, a, gj.clamp_(tensor_zero_cuda, int(gain[3] - 1)).long(), gi.clamp_(tensor_zero_cuda, int(gain[2] - 1)).long())) 
             tbox.append(torch.cat((gxy - gij, gwh), 1))  # box
             anch.append(anchors[a])  # anchors
             tcls.append(c)  # class

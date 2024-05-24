@@ -456,7 +456,7 @@ def parse_opt(known=False):
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
     parser.add_argument('--cache', type=str, nargs='?', const='ram', help='--cache images in "ram" (default) or "disk"')
     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
-    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    parser.add_argument('--device', default='0', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     # parser.add_argument('--multi-scale', action='store_true', help='vary img-size +/- 50%%')
     parser.add_argument('--multi-scale', default=True, help='vary img-size +/- 50%%')
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
@@ -620,6 +620,8 @@ def run(**kwargs):
         setattr(opt, k, v)
     main(opt)
 
+
+# python train.py --data hand_data.yaml --cfg hand_yolov5s.yaml --weights pretrained/yolov5s.pt --epoch 10 --batch-size 4 --device 0
 
 # python train.py --data hand_data.yaml --cfg hand_yolov5s.yaml --weights pretrained/yolov5s.pt --epoch 100 --batch-size 2 --device cpu
 # python train.py --data hand_data.yaml --cfg hand_yolov5l.yaml --weights pretrained/yolov5l.pt --epoch 100 --batch-size 2
