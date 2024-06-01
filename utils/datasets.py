@@ -29,6 +29,7 @@ from utils.augmentations import Albumentations, augment_hsv, copy_paste, letterb
 from utils.general import (LOGGER, check_dataset, check_requirements, check_yaml, clean_str, segments2boxes, xyn2xy,
                            xywh2xyxy, xywhn2xyxy, xyxy2xywhn)
 from utils.torch_utils import torch_distributed_zero_first
+import depthai as dai
 
 # Parameters
 HELP_URL = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
@@ -278,7 +279,110 @@ class LoadWebcam:  # for inference
 
     def __len__(self):
         return 0
+    
+'''Add a new ID. modifcation to adapt to OAK Cam '''
+class LoadStream:
+    def __init__(self, sources='streams.txt', img_size=640, stride=32, auto=True):
+        self.mode = 'stream'
+        self.img_size = img_size
+        self.stride = stride
 
+        if os.path.isfile(sources):
+            with open(sources) as f:
+                sources = [x.strip() for x in f.read().strip().splitlines() if len(x.strip())]
+        else:
+            sources = [sources]
+
+        n = len(sources)
+        self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
+        self.sources = [self.clean_str(x) for x in sources]
+        self.auto = auto
+        self.pipelines = [None] * n
+        self.device = dai.Device()  # Create device once and reuse for all streams
+        for i, s in enumerate(sources):
+            st = f'{i + 1}/{n}: {s}... '
+            if 'youtube.com/' in s or 'youtu.be/' in s:
+                self.check_requirements(('pafy', 'youtube_dl'))
+                import pafy
+                s = pafy.new(s).getbest(preftype="mp4").url
+            s = eval(s) if s.isnumeric() else s
+            
+            # Replace VideoCapture with DepthAI pipeline
+            pipeline = dai.Pipeline()
+            cam_rgb = pipeline.createColorCamera()
+            xout_rgb = pipeline.createXLinkOut()
+            xout_rgb.setStreamName("rgb")
+
+            cam_rgb.setPreviewSize(640, 480)
+            cam_rgb.setInterleaved(False)
+            cam_rgb.setBoardSocket(dai.CameraBoardSocket.RGB)
+            cam_rgb.preview.link(xout_rgb.input)
+
+            self.pipelines[i] = pipeline
+            self.device.startPipeline(pipeline)
+            self.q_rgb = self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
+
+            self.fps[i] = 30.0
+            self.frames[i] = float('inf')
+            self.imgs[i] = self.q_rgb.get().getCvFrame()  # guarantee first frame
+
+            self.threads[i] = Thread(target=self.update, args=([i, s]), daemon=True)
+            LOGGER.info(f"{st} Success ({self.frames[i]} frames at {self.fps[i]:.2f} FPS)")
+            self.threads[i].start()
+        LOGGER.info('')
+
+        s = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0].shape for x in self.imgs])
+        self.rect = np.unique(s, axis=0).shape[0] == 1
+        if not self.rect:
+            LOGGER.warning('WARNING: Stream shapes differ. For optimal performance supply similarly-shaped streams.')
+
+    def clean_str(self, s):
+        return ''.join(c if c.isalnum() else '_' for c in s)
+
+    def update(self, i, stream):
+        n, f, read = 0, self.frames[i], 1
+        while True:
+            n += 1
+            if n % read == 0:
+                im = self.q_rgb.get().getCvFrame()
+                if im is not None:
+                    self.imgs[i] = im
+                else:
+                    LOGGER.warning('WARNING: Video stream unresponsive, please check your OAK camera connection.')
+                    self.imgs[i] *= 0
+            time.sleep(1 / self.fps[i])
+
+    def __iter__(self):
+        self.count = -1
+        return self
+
+    def __next__(self):
+        self.count += 1
+        if not all(x.is_alive() for x in self.threads):
+            raise StopIteration
+
+        img0 = self.imgs.copy()
+        img = [letterbox(x, self.img_size, stride=self.stride, auto=self.rect and self.auto)[0] for x in img0]
+
+        img = np.stack(img, 0)
+
+        img = img[..., ::-1].transpose((0, 3, 1, 2))
+        img = np.ascontiguousarray(img)
+
+        # Display the frame
+        cv2.imshow('OAK Camera Stream', img[0][::-1].transpose((1, 2, 0)))
+
+        # Check for 'q' key press to exit
+        if cv2.waitKey(1) == ord('q'):
+            cv2.destroyAllWindows()
+            raise StopIteration
+
+        return self.sources, img, img0, None, ''
+
+    def __len__(self):
+        return len(self.sources)
+
+'''finish the modification  to adapt to OAK Cam '''
 
 class LoadStreams:
     # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
