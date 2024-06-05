@@ -33,6 +33,11 @@ from utils.general import (LOGGER, check_file, check_img_size, check_imshow, che
                            increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
 from utils.plots import Annotator, colors, save_one_box
 from utils.torch_utils import select_device, time_sync
+from match import find_closest_rectangle
+
+
+
+
 
 
 @torch.no_grad()
@@ -113,7 +118,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     h_fov = dataset.hFov
     # 推理和后处理
     dt, seen = [0.0, 0.0, 0.0], 0
-    for path, im, im0s, vid_cap, s in dataset:  # im来自dataset
+    for path, im, im0s, vid_cap, s, detections in dataset:  # im来自dataset
         if isinstance(im, tuple):
             im, depth = im
         if isinstance(im0s, tuple):
@@ -157,8 +162,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
             annotator = Annotator(im0, line_width=line_thickness, example=str(names), h_fov=h_fov)
-            if webcam:
-                annotator2 = Annotator(depth0, line_width=line_thickness, example=str(names))
+            #if webcam:
+                #annotator2 = Annotator(depth0, line_width=line_thickness, example=str(names))
             if len(det):
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(im.shape[2:], det[:, :4], im0.shape).round()
@@ -180,7 +185,50 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                         # save_img = False, 
                         c = int(cls)  # integer class
                         label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
-                        annotator.box_label(xyxy, label, color=colors(c, True))
+                        center = annotator.box_label(xyxy, label, color=colors(c, True))
+                        ##########################################################################
+                        height = im0.shape[0]
+                        width  = im0.shape[1]
+                        if detections:
+                            rects = []
+                            depthRects = []
+                            for detection in detections:
+                                if detection.label != 0: #person
+                                    continue
+                                if detection.confidence < 10:
+                                    continue
+                                roiData = detection.boundingBoxMapping
+                                roi = roiData.roi
+                                roi = roi.denormalize(depth0.shape[1], depth0.shape[0])
+                                topLeft = roi.topLeft()
+                                bottomRight = roi.bottomRight()
+                                #depth
+                                xmin = int(topLeft.x)
+                                ymin = int(topLeft.y)
+                                xmax = int(bottomRight.x)
+                                ymax = int(bottomRight.y)
+                                depthRects.append((xmin, ymin, xmax, ymax))
+                                # rgb
+                                # Denormalize bounding box
+                                x1 = int(detection.xmin * width)
+                                x2 = int(detection.xmax * width)
+                                y1 = int(detection.ymin * height)
+                                y2 = int(detection.ymax * height)
+                                rects.append(((x1, y1, x2, y2), detection))
+                            if rects:
+                                index, closest_dist, detectedObject = find_closest_rectangle(center, rects)
+                                if closest_dist < 300:
+                                    x1 = center[0]
+                                    y1 = center[1]
+                                    cv2.putText(im0, "{:.2f}".format(detectedObject.confidence), (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,0,255))
+                                    cv2.putText(im0, f"X: {int(detectedObject.spatialCoordinates.x)} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,255,0))
+                                    cv2.putText(im0, f"Y: {int(detectedObject.spatialCoordinates.y)} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,255,0))
+                                    cv2.putText(im0, f"Z: {int(detectedObject.spatialCoordinates.z)} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,255,0))
+                            if depthRects:
+                                for xmin, ymin, xmax, ymax in depthRects:
+                                    cv2.rectangle(depth0, (xmin, ymin), (xmax, ymax), (255,255,255), 2)
+                        ##########################################################################
+                    
                         #if webcam:
                             #annotator2.box_label(xyxy, label, color=colors(c, True))
                         if save_crop:
@@ -207,8 +255,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                # depth0 = annotator2.result()
             if view_img:
                 cv2.imshow(str(p), im0)
-                #if webcam:
-                    #cv2.imshow(str(p)+"depth", depth0)
+                if webcam:
+                    cv2.imshow(str(p)+"depth", depth0)
                 cv2.waitKey(1)  # 1 millisecond
 
             # Save results (image with detections)

@@ -32,6 +32,24 @@ from utils.general import (LOGGER, check_dataset, check_requirements, check_yaml
 from utils.torch_utils import torch_distributed_zero_first
 import depthai as dai
 
+nnBlobPath = str((Path(__file__).parent / Path('../models/yolo-v4-tiny-tf_openvino_2021.4_6shave.blob')).resolve().absolute())
+# Tiny yolo v3/4 label texts
+labelMap = [
+    "person",         "bicycle",    "car",           "motorbike",     "aeroplane",   "bus",           "train",
+    "truck",          "boat",       "traffic light", "fire hydrant",  "stop sign",   "parking meter", "bench",
+    "bird",           "cat",        "dog",           "horse",         "sheep",       "cow",           "elephant",
+    "bear",           "zebra",      "giraffe",       "backpack",      "umbrella",    "handbag",       "tie",
+    "suitcase",       "frisbee",    "skis",          "snowboard",     "sports ball", "kite",          "baseball bat",
+    "baseball glove", "skateboard", "surfboard",     "tennis racket", "bottle",      "wine glass",    "cup",
+    "fork",           "knife",      "spoon",         "bowl",          "banana",      "apple",         "sandwich",
+    "orange",         "broccoli",   "carrot",        "hot dog",       "pizza",       "donut",         "cake",
+    "chair",          "sofa",       "pottedplant",   "bed",           "diningtable", "toilet",        "tvmonitor",
+    "laptop",         "mouse",      "remote",        "keyboard",      "cell phone",  "microwave",     "oven",
+    "toaster",        "sink",       "refrigerator",  "book",          "clock",       "vase",          "scissors",
+    "teddy bear",     "hair drier", "toothbrush"
+]
+
+
 # Parameters
 HELP_URL = 'https://github.com/ultralytics/yolov5/wiki/Train-Custom-Data'
 IMG_FORMATS = ['bmp', 'jpg', 'jpeg', 'png', 'tif', 'tiff', 'dng', 'webp', 'mpo']  # acceptable image suffixes
@@ -297,6 +315,7 @@ class LoadStream:
         n = len(sources)
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
         self.depths = [None] * n
+        self.detections = [None] * n
         self.sources = [self.clean_str(x) for x in sources]
         self.auto = auto
         self.pipelines = [None] * n
@@ -311,64 +330,153 @@ class LoadStream:
             
             # Replace VideoCapture with DepthAI pipeline
             fps = 30
-            pipeline = dai.Pipeline()
-            cam_rgb = pipeline.createColorCamera()
-            cam_rgb.setInterleaved(False)
-            cam_rgb.setFps(fps)
-            xout_rgb = pipeline.createXLinkOut()
-            xout_rgb.setStreamName("rgb")
-            cam_rgb.setPreviewSize(640, 480) # (640, 480)
-            cam_rgb.setInterleaved(False)
-            cam_rgb.setBoardSocket(dai.CameraBoardSocket.RGB)
-            cam_rgb.preview.link(xout_rgb.input)
+            # pipeline = dai.Pipeline()
+            # cam_rgb = pipeline.createColorCamera()
+            # cam_rgb.setInterleaved(False)
+            # cam_rgb.setFps(fps)
+            # xout_rgb = pipeline.createXLinkOut()
+            # xout_rgb.setStreamName("rgb")
+            # cam_rgb.setPreviewSize(640, 480) # (640, 480)
+            # cam_rgb.setInterleaved(False)
+            # cam_rgb.setBoardSocket(dai.CameraBoardSocket.RGB)
+            # cam_rgb.preview.link(xout_rgb.input)
             
-            # xoutLeft = pipeline.createXLinkOut()
-            # xoutRight = pipeline.createXLinkOut()
-            xoutDepth = pipeline.createXLinkOut()
-            # xoutLeft.setStreamName("left")
-            # xoutRight.setStreamName("right")
-            xoutDepth.setStreamName("depth")
-            ####################################################################
-            left = pipeline.createMonoCamera()
-            left.setCamera("left")
-            left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
-            left.setFps(fps)
-            right = pipeline.createMonoCamera()
-            right.setCamera("right")
-            right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
-            right.setFps(fps)
-            #######################################
-            cam_stereo = pipeline.createStereoDepth()
-            cam_stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
-            # Better handling for occlusions:
-            cam_stereo.setLeftRightCheck(True)
-            # Closer-in minimum depth, disparity range is doubled:
-            cam_stereo.setExtendedDisparity(False)
-            # Better accuracy for longer distance, fractional disparity 32-levels:
-            cam_stereo.setSubpixel(False)
-            cam_stereo.initialConfig.setConfidenceThreshold(250)
-            cam_stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
-            cam_stereo.initialConfig.setLeftRightCheckThreshold(10)
-            config = cam_stereo.initialConfig.get()
-            config.postProcessing.speckleFilter.enable = True
-            config.postProcessing.speckleFilter.speckleRange = 50
-            # config.postProcessing.temporalFilter.enable = True
-            config.postProcessing.spatialFilter.enable = True
-            config.postProcessing.spatialFilter.holeFillingRadius = 2
-            config.postProcessing.spatialFilter.numIterations = 1
-            config.postProcessing.thresholdFilter.minRange = 400
-            config.postProcessing.thresholdFilter.maxRange = 15000
-            config.postProcessing.decimationFilter.decimationFactor = 4
-            config.postProcessing.decimationFilter.decimationMode = dai.RawStereoDepthConfig.PostProcessing.DecimationFilter.DecimationMode.NON_ZERO_MEDIAN
-            cam_stereo.initialConfig.set(config)
-            ########################################
-            left.out.link(cam_stereo.left)
-            right.out.link(cam_stereo.right)
-            # cam_stereo.syncedLeft.link(xoutLeft.input)
-            # cam_stereo.syncedRight.link(xoutRight.input)
-            cam_stereo.depth.link(xoutDepth.input)
-            #####################################################################
+            # ### yolo tiny 
+            # xoutNN = pipeline.create(dai.node.XLinkOut)
+            # xoutNN.setStreamName("detections")
+            # nnNetworkOut = pipeline.create(dai.node.XLinkOut)
+            # nnNetworkOut.setStreamName("nnNetwork")
+            # spatialDetectionNetwork = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+            # spatialDetectionNetwork.setBlobPath(nnBlobPath)
+            # spatialDetectionNetwork.setConfidenceThreshold(0.5)
+            # spatialDetectionNetwork.input.setBlocking(False)
+            # spatialDetectionNetwork.setBoundingBoxScaleFactor(0.5)
+            # spatialDetectionNetwork.setDepthLowerThreshold(100)
+            # spatialDetectionNetwork.setDepthUpperThreshold(5000)
+            # # Yolo specific parameters
+            # spatialDetectionNetwork.setNumClasses(80)
+            # spatialDetectionNetwork.setCoordinateSize(4)
+            # spatialDetectionNetwork.setAnchors([10,14, 23,27, 37,58, 81,82, 135,169, 344,319])
+            # spatialDetectionNetwork.setAnchorMasks({ "side26": [1,2,3], "side13": [3,4,5] })
+            # spatialDetectionNetwork.setIouThreshold(0.5)
+            
+            
+            # # xoutLeft = pipeline.createXLinkOut()
+            # # xoutRight = pipeline.createXLinkOut()
+            # xoutDepth = pipeline.createXLinkOut()
+            # # xoutLeft.setStreamName("left")
+            # # xoutRight.setStreamName("right")
+            # xoutDepth.setStreamName("depth")
+            # ####################################################################
+            # left = pipeline.createMonoCamera()
+            # left.setCamera("left")
+            # left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
+            # left.setFps(fps)
+            # right = pipeline.createMonoCamera()
+            # right.setCamera("right")
+            # right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
+            # right.setFps(fps)
+            # #######################################
+            # cam_stereo = pipeline.createStereoDepth()
+            # cam_stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+            # # Better handling for occlusions:
+            # cam_stereo.setLeftRightCheck(True)
+            # # Closer-in minimum depth, disparity range is doubled:
+            # cam_stereo.setExtendedDisparity(False)
+            # # Better accuracy for longer distance, fractional disparity 32-levels:
+            # cam_stereo.setSubpixel(False)
+            # cam_stereo.initialConfig.setConfidenceThreshold(250)
+            # cam_stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
+            # cam_stereo.initialConfig.setLeftRightCheckThreshold(10)
+            # config = cam_stereo.initialConfig.get()
+            # config.postProcessing.speckleFilter.enable = True
+            # config.postProcessing.speckleFilter.speckleRange = 50
+            # # config.postProcessing.temporalFilter.enable = True
+            # config.postProcessing.spatialFilter.enable = True
+            # config.postProcessing.spatialFilter.holeFillingRadius = 2
+            # config.postProcessing.spatialFilter.numIterations = 1
+            # config.postProcessing.thresholdFilter.minRange = 400
+            # config.postProcessing.thresholdFilter.maxRange = 15000
+            # config.postProcessing.decimationFilter.decimationFactor = 4
+            # config.postProcessing.decimationFilter.decimationMode = dai.RawStereoDepthConfig.PostProcessing.DecimationFilter.DecimationMode.NON_ZERO_MEDIAN
+            # cam_stereo.initialConfig.set(config)
+            # ########################################
+            # left.out.link(cam_stereo.left)
+            # right.out.link(cam_stereo.right)
+            # # cam_stereo.syncedLeft.link(xoutLeft.input)
+            # # cam_stereo.syncedRight.link(xoutRight.input)
+            # cam_stereo.depth.link(xoutDepth.input)
+            # #####################################################################
+            # spatialDetectionNetwork.passthrough.link(xout_rgb.input)
+            # spatialDetectionNetwork.out.link(xoutNN.input)
+            # cam_stereo.depth.link(spatialDetectionNetwork.inputDepth)
+            # spatialDetectionNetwork.passthroughDepth.link(xoutDepth.input)
+            # spatialDetectionNetwork.outNetwork.link(nnNetworkOut.input)
+            
+            # Create pipeline
+            pipeline = dai.Pipeline()
 
+            # Define sources and outputs
+            camRgb = pipeline.create(dai.node.ColorCamera)
+            spatialDetectionNetwork = pipeline.create(dai.node.YoloSpatialDetectionNetwork)
+            monoLeft = pipeline.create(dai.node.MonoCamera)
+            monoRight = pipeline.create(dai.node.MonoCamera)
+            stereo = pipeline.create(dai.node.StereoDepth)
+            nnNetworkOut = pipeline.create(dai.node.XLinkOut)
+
+            xoutRgb = pipeline.create(dai.node.XLinkOut)
+            xoutNN = pipeline.create(dai.node.XLinkOut)
+            xoutDepth = pipeline.create(dai.node.XLinkOut)
+
+            xoutRgb.setStreamName("rgb")
+            xoutNN.setStreamName("detections")
+            xoutDepth.setStreamName("depth")
+            nnNetworkOut.setStreamName("nnNetwork")
+
+            # Properties
+            camRgb.setPreviewSize(416, 416)
+            camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_1080_P)
+            camRgb.setInterleaved(False)
+            camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+
+            monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+            monoLeft.setCamera("left")
+            monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_400_P)
+            monoRight.setCamera("right")
+
+            # setting node configs
+            stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+            # Align depth map to the perspective of RGB camera, on which inference is done
+            stereo.setDepthAlign(dai.CameraBoardSocket.CAM_A)
+            stereo.setOutputSize(monoLeft.getResolutionWidth(), monoLeft.getResolutionHeight())
+            stereo.setSubpixel(True)
+
+            spatialDetectionNetwork.setBlobPath(nnBlobPath)
+            spatialDetectionNetwork.setConfidenceThreshold(0.5)
+            spatialDetectionNetwork.input.setBlocking(False)
+            spatialDetectionNetwork.setBoundingBoxScaleFactor(0.5)
+            spatialDetectionNetwork.setDepthLowerThreshold(100)
+            spatialDetectionNetwork.setDepthUpperThreshold(5000)
+
+            # Yolo specific parameters
+            spatialDetectionNetwork.setNumClasses(80)
+            spatialDetectionNetwork.setCoordinateSize(4)
+            spatialDetectionNetwork.setAnchors([10,14, 23,27, 37,58, 81,82, 135,169, 344,319])
+            spatialDetectionNetwork.setAnchorMasks({ "side26": [1,2,3], "side13": [3,4,5] })
+            spatialDetectionNetwork.setIouThreshold(0.5)
+
+            # Linking
+            monoLeft.out.link(stereo.left)
+            monoRight.out.link(stereo.right)
+
+            camRgb.preview.link(spatialDetectionNetwork.input)
+            spatialDetectionNetwork.passthrough.link(xoutRgb.input)
+            spatialDetectionNetwork.out.link(xoutNN.input)
+
+            stereo.depth.link(spatialDetectionNetwork.inputDepth)
+            spatialDetectionNetwork.passthroughDepth.link(xoutDepth.input)
+            spatialDetectionNetwork.outNetwork.link(nnNetworkOut.input)
+            
             self.pipelines[i] = pipeline
             self.device.startPipeline(pipeline)
             # read FOV
@@ -387,12 +495,15 @@ class LoadStream:
             self.q_depth = self.device.getOutputQueue(name="depth",  maxSize=4, blocking=False)
             # self.q_left = self.device.getOutputQueue(name="left",  maxSize=4, blocking=False)
             # self.q_right = self.device.getOutputQueue(name="right",  maxSize=4, blocking=False)
+            self.detectionNNQueue = self.device.getOutputQueue(name="detections", maxSize=4, blocking=False)
+            self.networkQueue = self.device.getOutputQueue(name="nnNetwork", maxSize=4, blocking=False)
+
 
             self.fps[i] = fps
             self.frames[i] = float('inf')
             self.imgs[i] = self.q_rgb.get().getCvFrame()  # guarantee first frame
             self.depths[i] = np.zeros_like(self.imgs[i])
-
+            self.detections[i] = []
             # 指定了线程要执行的目标函数是 update 方法。换句话说，update 方法是独立运行在一个新线程中的
             self.threads[i] = Thread(target=self.update, args=([i, s]), daemon=True)
             '''
@@ -434,6 +545,8 @@ class LoadStream:
             if n % read == 0:  # 每当循环迭代次数n能被read整除时（在这个特定案例中，每次循环都会执行），尝试从DepthAI设备的输出队列self.q_rgb中获取新的视频帧。
                 im = self.q_rgb.get().getCvFrame()  # 获取OAK摄像头rgb视频流的当前帧
                 depth = self.q_depth.get().getCvFrame() # 获取OAK摄像头rgb视频流的当前帧
+                inDet = self.detectionNNQueue.get()
+                inNN = self.networkQueue.get()
                 # left = self.q_left.get().getCvFrame() # 获取OAK摄像头rgb视频流的当前帧
                 # right = self.q_right.get().getCvFrame() # 获取OAK摄像头rgb视频流的当前帧
                 if im is not None:  # 如果获取到的帧im不为None，则更新self.imgs[i]，即当前视频流的图像缓存。
@@ -443,6 +556,8 @@ class LoadStream:
                     self.imgs[i] *= 0
                 if depth is not None:
                     self.depths[i] = depth
+                if inDet is not None:
+                    self.detections[i] = inDet.detections
                 else:
                     LOGGER.warning('WARNING: Depth stream unresponsive, please check your OAK camera connection.')
                     self.depths[i] *= 0
@@ -463,14 +578,24 @@ class LoadStream:
         depth = [letterbox(x, self.img_size, stride=self.stride, auto=self.rect and self.auto)[0] for x in depth0]
         img = np.stack(img, 0)
         #depth = np.stack(depth, 0)
-        depth[0] = cv2.cvtColor(depth[0], cv2.COLOR_GRAY2BGR).astype(np.uint8)
+        #depth[0] = cv2.cvtColor(depth[0], cv2.COLOR_GRAY2BGR).astype(np.uint8)
+        #depth[0] = depth[0].astype(np.uint8)
+        depth_downscaled = depth[0][::4]
+        if np.all(depth_downscaled == 0):
+            min_depth = 0  # Set a default minimum depth value when all elements are zero
+        else:
+            min_depth = np.percentile(depth_downscaled[depth_downscaled != 0], 1)
+        max_depth = np.percentile(depth_downscaled, 99)
+        depthFrameColor = np.interp(depth[0], (min_depth, max_depth), (0, 255)).astype(np.uint8)
+        depth[0] = cv2.applyColorMap(depthFrameColor, cv2.COLORMAP_HOT)
+        
         cv2.imshow('OAK Depth Stream', depth[0])
 
         img = img[..., ::-1].transpose((0, 3, 1, 2))
         #depth = depth[..., ::-1].transpose()
 
         img = np.ascontiguousarray(img)
-        depth = np.ascontiguousarray(depth)
+        depth = np.ascontiguousarray(depth)  
 
         # Display the frame
         cv2.imshow('OAK Camera Stream', img[0][::-1].transpose((1, 2, 0)))
@@ -481,7 +606,7 @@ class LoadStream:
             cv2.destroyAllWindows()
             raise StopIteration
 
-        return self.sources, (img, depth),(img0,depth), None, ''
+        return self.sources, (img, depth),(img0,depth), None, '', self.detections[0]
 
     def __len__(self):
         return len(self.sources)
@@ -570,7 +695,7 @@ class LoadStreams:
         img = img[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
         img = np.ascontiguousarray(img)
 
-        return self.sources, img, img0, None, ''
+        return self.sources, img, img0, None, '', None
 
     def __len__(self):
         return len(self.sources)  # 1E12 frames = 32 streams at 30 FPS for 30 years

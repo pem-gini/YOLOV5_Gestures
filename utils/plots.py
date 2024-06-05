@@ -127,6 +127,7 @@ class Annotator:
                 cv2.rectangle(self.im, p1, p2, color, -1, cv2.LINE_AA)  # filled
                 cv2.putText(self.im, label + " | %ideg"%int(angleDeg), (p1[0], p1[1] - 2 if outside else p1[1] + h + 2), 0, self.lw / 3, txt_color,
                             thickness=tf, lineType=cv2.LINE_AA)
+        return center
 
     def rectangle(self, xy, fill=None, outline=None, width=1):
         # Add rectangle to image (PIL-only)
