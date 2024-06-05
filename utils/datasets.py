@@ -15,6 +15,7 @@ from multiprocessing.pool import Pool, ThreadPool
 from pathlib import Path
 from threading import Thread
 from zipfile import ZipFile
+import math
 
 import cv2
 import numpy as np
@@ -295,6 +296,7 @@ class LoadStream:
 
         n = len(sources)
         self.imgs, self.fps, self.frames, self.threads = [None] * n, [0] * n, [0] * n, [None] * n
+        self.depths = [None] * n
         self.sources = [self.clean_str(x) for x in sources]
         self.auto = auto
         self.pipelines = [None] * n
@@ -308,25 +310,96 @@ class LoadStream:
             s = eval(s) if s.isnumeric() else s
             
             # Replace VideoCapture with DepthAI pipeline
+            fps = 30
             pipeline = dai.Pipeline()
             cam_rgb = pipeline.createColorCamera()
+            cam_rgb.setInterleaved(False)
+            cam_rgb.setFps(fps)
             xout_rgb = pipeline.createXLinkOut()
             xout_rgb.setStreamName("rgb")
-
-            cam_rgb.setPreviewSize(640, 480)
+            cam_rgb.setPreviewSize(640, 480) # (640, 480)
             cam_rgb.setInterleaved(False)
             cam_rgb.setBoardSocket(dai.CameraBoardSocket.RGB)
             cam_rgb.preview.link(xout_rgb.input)
+            
+            # xoutLeft = pipeline.createXLinkOut()
+            # xoutRight = pipeline.createXLinkOut()
+            xoutDepth = pipeline.createXLinkOut()
+            # xoutLeft.setStreamName("left")
+            # xoutRight.setStreamName("right")
+            xoutDepth.setStreamName("depth")
+            ####################################################################
+            left = pipeline.createMonoCamera()
+            left.setCamera("left")
+            left.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
+            left.setFps(fps)
+            right = pipeline.createMonoCamera()
+            right.setCamera("right")
+            right.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
+            right.setFps(fps)
+            #######################################
+            cam_stereo = pipeline.createStereoDepth()
+            cam_stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)
+            # Better handling for occlusions:
+            cam_stereo.setLeftRightCheck(True)
+            # Closer-in minimum depth, disparity range is doubled:
+            cam_stereo.setExtendedDisparity(False)
+            # Better accuracy for longer distance, fractional disparity 32-levels:
+            cam_stereo.setSubpixel(False)
+            cam_stereo.initialConfig.setConfidenceThreshold(250)
+            cam_stereo.initialConfig.setMedianFilter(dai.MedianFilter.KERNEL_7x7)
+            cam_stereo.initialConfig.setLeftRightCheckThreshold(10)
+            config = cam_stereo.initialConfig.get()
+            config.postProcessing.speckleFilter.enable = True
+            config.postProcessing.speckleFilter.speckleRange = 50
+            # config.postProcessing.temporalFilter.enable = True
+            config.postProcessing.spatialFilter.enable = True
+            config.postProcessing.spatialFilter.holeFillingRadius = 2
+            config.postProcessing.spatialFilter.numIterations = 1
+            config.postProcessing.thresholdFilter.minRange = 400
+            config.postProcessing.thresholdFilter.maxRange = 15000
+            config.postProcessing.decimationFilter.decimationFactor = 4
+            config.postProcessing.decimationFilter.decimationMode = dai.RawStereoDepthConfig.PostProcessing.DecimationFilter.DecimationMode.NON_ZERO_MEDIAN
+            cam_stereo.initialConfig.set(config)
+            ########################################
+            left.out.link(cam_stereo.left)
+            right.out.link(cam_stereo.right)
+            # cam_stereo.syncedLeft.link(xoutLeft.input)
+            # cam_stereo.syncedRight.link(xoutRight.input)
+            cam_stereo.depth.link(xoutDepth.input)
+            #####################################################################
 
             self.pipelines[i] = pipeline
             self.device.startPipeline(pipeline)
-            self.q_rgb = self.device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
+            # read FOV
+            calibData = self.device.readCalibration()
+            cameras = self.device.getConnectedCameras()
+            for cam in cameras:
+                M, width, height = calibData.getDefaultIntrinsics(cam)
+                M = np.array(M)
+                d = np.array(calibData.getDistortionCoefficients(cam))
+                def getHFov(intrinsics, width):
+                    fx = intrinsics[0][0]
+                    fov = 2 * 180 / (math.pi) * math.atan(width * 0.5 / fx)
+                    return fov
+                self.hFov = getHFov(M, width)  
+            self.q_rgb = self.device.getOutputQueue(name="rgb", maxSize=4 , blocking=False)
+            self.q_depth = self.device.getOutputQueue(name="depth",  maxSize=4, blocking=False)
+            # self.q_left = self.device.getOutputQueue(name="left",  maxSize=4, blocking=False)
+            # self.q_right = self.device.getOutputQueue(name="right",  maxSize=4, blocking=False)
 
-            self.fps[i] = 30.0
+            self.fps[i] = fps
             self.frames[i] = float('inf')
             self.imgs[i] = self.q_rgb.get().getCvFrame()  # guarantee first frame
+            self.depths[i] = np.zeros_like(self.imgs[i])
 
+            # 指定了线程要执行的目标函数是 update 方法。换句话说，update 方法是独立运行在一个新线程中的
             self.threads[i] = Thread(target=self.update, args=([i, s]), daemon=True)
+            '''
+            self.threads[i]，
+            换句话说就是self.threads这个list中的每一个元素都是一个Thread的实例化对象
+            Thread来自Python 标准库中的 threading，是一个底层控制库，用于控制CPU的线程
+            '''
             LOGGER.info(f"{st} Success ({self.frames[i]} frames at {self.fps[i]:.2f} FPS)")
             self.threads[i].start()
         LOGGER.info('')
@@ -339,18 +412,41 @@ class LoadStream:
     def clean_str(self, s):
         return ''.join(c if c.isalnum() else '_' for c in s)
 
+    # 持续更新指定视频流图像帧
+    '''
+    为每个视频流启动的线程所调用，它在后台运行，不断地从DepthAI设备获取最新的视频帧数据。
+    update方法在单独的线程中运行，这意味着视频流的读取和处理与主线程（可能在做其他任务，如显示图像或进一步处理视频帧）是并发的，
+    提高了程序的效率和响应性。
+    
+    params：
+        i： 线程/视频流的索引，用来识别当前处理的是哪个视频流
+        stream: 视频流的标识
+        
+    local variable：
+        n: 计数器，用于跟踪循环迭代次数。
+        f: 当前线程对应的视频流的总帧数
+        read: 读取间隔，这里是1，意味着每循环一次就尝试读取一次帧，但实际上这个值在当前代码段中未变化，设定为1可能是为了未来扩展功能（比如降低读取频率）留有余地。
+    '''
     def update(self, i, stream):
         n, f, read = 0, self.frames[i], 1
         while True:
             n += 1
-            if n % read == 0:
-                im = self.q_rgb.get().getCvFrame()
-                if im is not None:
+            if n % read == 0:  # 每当循环迭代次数n能被read整除时（在这个特定案例中，每次循环都会执行），尝试从DepthAI设备的输出队列self.q_rgb中获取新的视频帧。
+                im = self.q_rgb.get().getCvFrame()  # 获取OAK摄像头rgb视频流的当前帧
+                depth = self.q_depth.get().getCvFrame() # 获取OAK摄像头rgb视频流的当前帧
+                # left = self.q_left.get().getCvFrame() # 获取OAK摄像头rgb视频流的当前帧
+                # right = self.q_right.get().getCvFrame() # 获取OAK摄像头rgb视频流的当前帧
+                if im is not None:  # 如果获取到的帧im不为None，则更新self.imgs[i]，即当前视频流的图像缓存。
                     self.imgs[i] = im
-                else:
+                else:  # 如果获取帧失败（im is None），则记录警告信息，并将当前视频流的图像缓存清零，这是一种处理视频流中断或错误的简单方式。
                     LOGGER.warning('WARNING: Video stream unresponsive, please check your OAK camera connection.')
                     self.imgs[i] *= 0
-            time.sleep(1 / self.fps[i])
+                if depth is not None:
+                    self.depths[i] = depth
+                else:
+                    LOGGER.warning('WARNING: Depth stream unresponsive, please check your OAK camera connection.')
+                    self.depths[i] *= 0
+            #time.sleep(1 / self.fps[i])  # 控制帧处理的速率，确保实际处理速度与预期的视频帧率相匹配
 
     def __iter__(self):
         self.count = -1
@@ -362,22 +458,30 @@ class LoadStream:
             raise StopIteration
 
         img0 = self.imgs.copy()
+        depth0 = self.depths.copy()
         img = [letterbox(x, self.img_size, stride=self.stride, auto=self.rect and self.auto)[0] for x in img0]
-
+        depth = [letterbox(x, self.img_size, stride=self.stride, auto=self.rect and self.auto)[0] for x in depth0]
         img = np.stack(img, 0)
+        #depth = np.stack(depth, 0)
+        depth[0] = cv2.cvtColor(depth[0], cv2.COLOR_GRAY2BGR).astype(np.uint8)
+        cv2.imshow('OAK Depth Stream', depth[0])
 
         img = img[..., ::-1].transpose((0, 3, 1, 2))
+        #depth = depth[..., ::-1].transpose()
+
         img = np.ascontiguousarray(img)
+        depth = np.ascontiguousarray(depth)
 
         # Display the frame
         cv2.imshow('OAK Camera Stream', img[0][::-1].transpose((1, 2, 0)))
+        cv2.imshow('OAK Depth Stream', depth[0])
 
         # Check for 'q' key press to exit
         if cv2.waitKey(1) == ord('q'):
             cv2.destroyAllWindows()
             raise StopIteration
 
-        return self.sources, img, img0, None, ''
+        return self.sources, (img, depth),(img0,depth), None, ''
 
     def __len__(self):
         return len(self.sources)
