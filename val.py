@@ -23,15 +23,15 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-from models.common import DetectMultiBackend
-from utils.callbacks import Callbacks
-from utils.datasets import create_dataloader
-from utils.general import (LOGGER, NCOLS, box_iou, check_dataset, check_img_size, check_requirements, check_yaml,
+from YOLOV5_Gestures.models.common import DetectMultiBackend
+from YOLOV5_Gestures.utils.callbacks import Callbacks
+from YOLOV5_Gestures.utils.datasets import create_dataloader
+from YOLOV5_Gestures.utils.general import (LOGGER, NCOLS, box_iou, check_dataset, check_img_size, check_requirements, check_yaml,
                            coco80_to_coco91_class, colorstr, increment_path, non_max_suppression, print_args,
                            scale_coords, xywh2xyxy, xyxy2xywh)
-from utils.metrics import ConfusionMatrix, ap_per_class
-from utils.plots import output_to_target, plot_images, plot_val_study
-from utils.torch_utils import select_device, time_sync
+from YOLOV5_Gestures.utils.metrics import ConfusionMatrix, ap_per_class
+from YOLOV5_Gestures.utils.plots import output_to_target, plot_images, plot_val_study
+from YOLOV5_Gestures.utils.torch_utils import select_device, time_sync
 
 
 def save_one_txt(predn, save_conf, shape, file):
@@ -267,7 +267,7 @@ def run(data,
     # Save JSON
     if save_json and len(jdict):
         w = Path(weights[0] if isinstance(weights, list) else weights).stem if weights is not None else ''  # weights
-        anno_json = str(Path(data.get('path', '../coco')) / 'annotations/instances_val2017.json')  # annotations json
+        anno_json = str(Path(data.get('path', '../../coco')) / 'annotations/instances_val2017.json')  # annotations json
         pred_json = str(save_dir / f"{w}_predictions.json")  # predictions json
         LOGGER.info(f'\nEvaluating pycocotools mAP... saving {pred_json}...')
         with open(pred_json, 'w') as f:
@@ -332,7 +332,7 @@ def parse_opt():
 
 
 def main(opt):
-    check_requirements(requirements=ROOT / 'requirements.txt', exclude=('tensorboard', 'thop'))
+    check_requirements(requirements=ROOT / '../requirements.txt', exclude=('tensorboard', 'thop'))
 
     if opt.task in ('train', 'val', 'test'):  # run normally
         if opt.conf_thres > 0.001:  # https://github.com/ultralytics/yolov5/issues/1466

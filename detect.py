@@ -27,12 +27,12 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-from models.common import DetectMultiBackend
-from utils.datasets import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams
-from utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
+from from YOLOV5_Gestures.models.common import DetectMultiBackend
+from YOLOV5_Gestures.utils.datasets import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams
+from YOLOV5_Gestures.utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
                            increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
-from utils.plots import Annotator, colors, save_one_box
-from utils.torch_utils import select_device, time_sync
+from YOLOV5_Gestures.utils.plots import Annotator, colors, save_one_box
+from YOLOV5_Gestures.utils.torch_utils import select_device, time_sync
 
 
 @torch.no_grad()

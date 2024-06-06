@@ -27,17 +27,14 @@ if str(ROOT) not in sys.path:
     sys.path.append(str(ROOT))  # add ROOT to PATH
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
-from models.common import DetectMultiBackend
-from utils.datasets import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams, LoadStream
-from utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
+
+from YOLOV5_Gestures.utils.modelWrapper import ModelWrapper
+from YOLOV5_Gestures.utils.datasets import IMG_FORMATS, VID_FORMATS, LoadImages, LoadStreams, LoadStream
+from YOLOV5_Gestures.utils.general import (LOGGER, check_file, check_img_size, check_imshow, check_requirements, colorstr,
                            increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
-from utils.plots import Annotator, colors, save_one_box
-from utils.torch_utils import select_device, time_sync
-from match import find_closest_rectangle
-
-
-
-
+from YOLOV5_Gestures.utils.plots import Annotator, colors, save_one_box
+from YOLOV5_Gestures.utils.torch_utils import select_device, time_sync
+from YOLOV5_Gestures.utils.match import find_closest_rectangle
 
 
 @torch.no_grad()
@@ -86,34 +83,19 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
     save_dir = increment_path(Path(project) / name, exist_ok=exist_ok)  # increment run
     (save_dir / 'labels' if save_txt else save_dir).mkdir(parents=True, exist_ok=True)  # make dir
 
-    # Load model
-    device = select_device(device) # 加载cuda
-    model = DetectMultiBackend(weights, device=device, dnn=dnn)
-    stride, names, pt, jit, onnx = model.stride, model.names, model.pt, model.jit, model.onnx
-    imgsz = check_img_size(imgsz, s=stride)  # check image size
-
-    # 半精度支持
-    # Half
-    half &= pt and device.type != 'cpu'  # half precision only supported by PyTorch on CUDA
-    if pt:
-        model.model.half() if half else model.model.float()
+    wrapper = ModelWrapper(weights, device=device, imgsz=imgsz, dnn=dnn)
 
     # 数据加载
     # Dataloader
     if webcam:
         view_img = check_imshow()
         cudnn.benchmark = True  # set True to speed up constant image size inference
-        dataset = LoadStream(source, img_size=imgsz, stride=stride, auto=pt and not jit)
+        dataset = LoadStream(source, img_size=imgsz, stride=wrapper.stride, auto=wrapper.pt and not wrapper.jit)
         bs = len(dataset)  # batch_size
     else:
-        dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt and not jit)
+        dataset = LoadImages(source, img_size=imgsz, stride=wrapper.stride, auto=wrapper.pt and not wrapper.jit)
         bs = 1  # batch_size
     vid_path, vid_writer = [None] * bs, [None] * bs
-
-    # 推理准备
-    # Run inference
-    if pt and device.type != 'cpu':  # 如果使用PyTorch且设备不是CPU，对模型进行预热。
-        model(torch.zeros(1, 3, *imgsz).to(device).type_as(next(model.model.parameters())))  # warmup
 
     h_fov = dataset.hFov
     # 推理和后处理
@@ -124,8 +106,8 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
         if isinstance(im0s, tuple):
             im0s, depth0s = im0s
         t1 = time_sync()
-        im = torch.from_numpy(im).to(device)
-        im = im.half() if half else im.float()  # uint8 to fp16/32
+        im = torch.from_numpy(im).to(wrapper.device)
+        im = im.half() if wrapper.half else im.float()  # uint8 to fp16/32
         im /= 255  # 0 - 255 to 0.0 - 1.0，normalization
         if len(im.shape) == 3:
             im = im[None]  # expand for batch dim
@@ -134,7 +116,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
 
         # Inference
         visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-        pred = model(im, augment=augment, visualize=visualize)  # 推理需要im作为参数，im来自dataset  🔺
+        pred = wrapper.model(im, augment=augment, visualize=visualize)  # 推理需要im作为参数，im来自dataset  🔺
         t3 = time_sync()
         dt[1] += t3 - t2
 
@@ -161,7 +143,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
             s += '%gx%g ' % im.shape[2:]  # print string
             gn = torch.tensor(im0.shape)[[1, 0, 1, 0]]  # normalization gain whwh
             imc = im0.copy() if save_crop else im0  # for save_crop
-            annotator = Annotator(im0, line_width=line_thickness, example=str(names), h_fov=h_fov)
+            annotator = Annotator(im0, line_width=line_thickness, example=str(wrapper.names), h_fov=h_fov)
             #if webcam:
                 #annotator2 = Annotator(depth0, line_width=line_thickness, example=str(names))
             if len(det):
@@ -171,7 +153,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                 # Print results
                 for c in det[:, -1].unique():
                     n = (det[:, -1] == c).sum()  # detections per class
-                    s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
+                    s += f"{n} {wrapper.names[int(c)]}{'s' * (n > 1)}, "  # add to string
 
                 # Write results
                 for *xyxy, conf, cls in reversed(det):
@@ -184,7 +166,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                     if save_img or save_crop or view_img:  # Add bbox to image
                         # save_img = False, 
                         c = int(cls)  # integer class
-                        label = None if hide_labels else (names[c] if hide_conf else f'{names[c]} {conf:.2f}')
+                        label = None if hide_labels else (wrapper.names[c] if hide_conf else f'{wrapper.names[c]} {conf:.2f}')
                         center = annotator.box_label(xyxy, label, color=colors(c, True))
                         ##########################################################################
                         height = im0.shape[0]
@@ -232,7 +214,7 @@ def run(weights=ROOT / 'yolov5s.pt',  # model.pt path(s)
                         #if webcam:
                             #annotator2.box_label(xyxy, label, color=colors(c, True))
                         if save_crop:
-                            save_one_box(xyxy, imc, file=save_dir / 'crops' / names[c] / f'{p.stem}.jpg', BGR=True)
+                            save_one_box(xyxy, imc, file=save_dir / 'crops' / wrapper.names[c] / f'{p.stem}.jpg', BGR=True)
             
             '''
             👆

@@ -27,11 +27,11 @@ def _create(name, pretrained=True, channels=3, classes=80, autoshape=True, verbo
     """
     from pathlib import Path
 
-    from models.experimental import attempt_load
-    from models.yolo import Model
-    from utils.downloads import attempt_download
-    from utils.general import check_requirements, intersect_dicts, set_logging
-    from utils.torch_utils import select_device
+    from YOLOV5_Gestures.models.experimental import attempt_load
+    from YOLOV5_Gestures.models.yolo import Model
+    from YOLOV5_Gestures.utils.downloads import attempt_download
+    from YOLOV5_Gestures.utils.general import check_requirements, intersect_dicts, set_logging
+    from YOLOV5_Gestures.utils.torch_utils import select_device
 
     file = Path(__file__).resolve()
     check_requirements(exclude=('tensorboard', 'thop', 'opencv-python'))

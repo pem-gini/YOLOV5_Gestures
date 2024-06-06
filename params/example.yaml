@@ -1,0 +1,5 @@
+gesture_recognition_inference_node:
+  ros__parameters:
+    visualize: False
+    rgb_topic: "/rgb/image_raw"
+    depth_topic: "/depth/image_raw"

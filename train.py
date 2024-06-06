@@ -32,14 +32,14 @@ if str(ROOT) not in sys.path:
 ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
 import val  # for end-of-epoch mAP
-from models.experimental import attempt_load
-from models.yolo import Model
-from utils.autoanchor import check_anchors
-from utils.autobatch import check_train_batch_size
-from utils.callbacks import Callbacks
-from utils.datasets import create_dataloader
-from utils.downloads import attempt_download
-from utils.general import (LOGGER, NCOLS, check_dataset, check_file, check_git_status, check_img_size,
+from YOLOV5_Gestures.models.experimental import attempt_load
+from YOLOV5_Gestures.models.yolo import Model
+from YOLOV5_Gestures.utils.autoanchor import check_anchors
+from YOLOV5_Gestures.utils.autobatch import check_train_batch_size
+from YOLOV5_Gestures.utils.callbacks import Callbacks
+from YOLOV5_Gestures.utils.datasets import create_dataloader
+from YOLOV5_Gestures.utils.downloads import attempt_download
+from YOLOV5_Gestures.utils.general import (LOGGER, NCOLS, check_dataset, check_file, check_git_status, check_img_size,
                            check_requirements, check_suffix, check_yaml, colorstr, get_latest_run, increment_path,
                            init_seeds, intersect_dicts, labels_to_class_weights, labels_to_image_weights, methods,
                            one_cycle, print_args, print_mutation, strip_optimizer)
