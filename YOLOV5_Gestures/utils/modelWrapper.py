@@ -117,11 +117,9 @@ class ModelWrapper:
                 # Rescale boxes from img_size to im0 size
                 det[:, :4] = scale_coords(rgb.shape[2:], det[:, :4], rgb.shape).round()
                 for *xyxy, conf, cls in reversed(det):
-                    predictions.append(xyxy, conf, cls)
+                    predictions.append(xyxy, conf, int(cls))
         return predictions, img
-def annotateImages(rgb, depth, predictions, oakddetections):
-    # annotator = None
-    # if liveAnnotation:
-    #     line_thickness=3,  # bounding box thickness (pixels)
-    #     annotator = Annotator(rgb, line_width=line_thickness, example=str(self.names))
-    pass
+    def lookupName(self, cls):
+        if cls < len(self.names):
+            return self.names[cls]
+        return ""
