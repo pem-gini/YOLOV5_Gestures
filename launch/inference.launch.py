@@ -17,8 +17,8 @@ def generate_launch_description():
             emulate_tty=True,
             parameters=[{
                 "model_checkpoint": LaunchConfiguration('checkpoint'),
-                "rgb_topic": "/rgb/image_raw",
-                "depth_topic": "/depth/image_raw",
+                # "rgb_topic": "/oak/rgb/image_raw",
+                # "depth_topic": "/oak/stereo/image_raw",
                 "visualize": True,
             }]
         ),

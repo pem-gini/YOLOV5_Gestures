@@ -23,7 +23,7 @@ def find_closest_rectangle(pixel, rectangles):
     pixel_x, pixel_y = pixel
     closest_rectangle = None
     min_distance = float('inf')
-    index = 0
+    index = None
     for i, stuff in enumerate(rectangles):
         rect, obj = stuff
         center = center_of_rectangle(rect)

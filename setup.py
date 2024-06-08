@@ -19,7 +19,7 @@ setup(
         ('share/' + package_name + '/params/', glob('params/*.rviz')),
         ### package relevant source files as well, so that we can import them locally
         (os.path.join('lib', package_name, 'utils'), glob(os.path.join(package_name, 'utils', '*.py'))),
-        (os.path.join('lib', package_name, 'models'), glob(os.path.join(package_name, 'models', '*.blob'))),
+        (os.path.join('share', package_name, 'models'), glob(os.path.join(package_name, 'models', '*.blob'))),
         (os.path.join('share', package_name, 'runs/train/exp20/weights/'), glob(os.path.join('runs/train/exp20/weights/', '*.pt'))),
     ],
     install_requires=['setuptools'],
