@@ -19,10 +19,12 @@ from threading import Lock
 
 
 ### ros packaged imports
+from duck2_msgs.msg import FollowMeHumanList, FollowMeHuman, FollowMeGesture
+
 from YOLOV5_Gestures.utils.match import find_closest_rectangle
 from YOLOV5_Gestures.utils.modelWrapper import ModelWrapper
 from YOLOV5_Gestures.utils.plots import colors
-
+from YOLOV5_Gestures.utils.gestureTracker import KalmanGestureTracker, KalmanObject
 #############################################################################################
 class OakDDetection:
     def __init__(self, center, size, conf, xyz):
@@ -63,7 +65,7 @@ class Match:
         self.conf = conf
         self.rectRgb = rectRgb
         self.rectDepth = rectDepth
-        self.xyz = xyz
+        self.x, self.y, self.z = xyz
     def __repr__(self) -> str:
         return str(self.__dict__)
 
@@ -108,32 +110,40 @@ class Annotator:
     size = 0.75
     # textcolor = (0,255,0)
     @staticmethod
+    def drawMatchRgb(rgb_img, m, extraStr=""):
+        label = f'{m.classname} {m.conf:.2f}'
+        if extraStr:
+            label += " | %s" % extraStr
+        classColor = colors(m.cls, True)
+        x,y,z = (m.x, m.y, m.z)
+        ### annotate rgb image rect and depth info
+        center = centerFromRect(m.rectRgb)
+        centerx = center[0]
+        centery = center[1]
+        x1, y1, x2, y2 = m.rectRgb
+        p1, p2 = (int(x1), int(y1)), (int(x2), int(y2))
+        cv2.rectangle(rgb_img, p1, p2, classColor, thickness=1, lineType=cv2.LINE_AA)
+        cv2.putText(rgb_img, label, (p1[0], p1[1] - 2), 0, Annotator.size, classColor, thickness=3, lineType=cv2.LINE_AA)
+        cv2.putText(rgb_img, "{:.2f}".format(m.conf), (centerx + 10, centery + 35), Annotator.font, Annotator.size, classColor)
+        cv2.putText(rgb_img, f"X: {x:.3f} m", (centerx + 10, centery + 50), Annotator.font, Annotator.size, classColor)
+        cv2.putText(rgb_img, f"Y: {y:.3f} m", (centerx + 10, centery + 65), Annotator.font, Annotator.size, classColor)
+        cv2.putText(rgb_img, f"Z: {z:.3f} m", (centerx + 10, centery + 80), Annotator.font, Annotator.size, classColor)
+        return rgb_img
+    def drawMatchDepth(depth_img, m):
+        x1, y1, x2, y2 = m.rectDepth
+        p1, p2 = (int(x1), int(y1)), (int(x2), int(y2))
+        cv2.rectangle(depth_img, p1, p2, (255,255,255), 2)
+        return depth_img
     def drawMatches(rgb, depth, matches):
         if not matches:
             return rgb, depth
         rgb_img = rgb.copy()
         depth_img = depth.copy()
         m : Match
+        #### annotate rgb + depth image rect
         for m in matches:
-            label = f'{m.classname} {m.conf:.2f}'
-            classColor = colors(m.cls, True)
-            x,y,z = m.xyz
-            ### annotate rgb image rect and depth info
-            center = centerFromRect(m.rectRgb)
-            centerx = center[0]
-            centery = center[1]
-            x1, y1, x2, y2 = m.rectRgb
-            p1, p2 = (int(x1), int(y1)), (int(x2), int(y2))
-            cv2.rectangle(rgb_img, p1, p2, classColor, thickness=1, lineType=cv2.LINE_AA)
-            cv2.putText(rgb_img, label, (p1[0], p1[1] - 2), 0, 0.5, classColor, thickness=2, lineType=cv2.LINE_AA)
-            cv2.putText(rgb_img, "{:.2f}".format(m.conf), (centerx + 10, centery + 35), Annotator.font, Annotator.size, classColor)
-            cv2.putText(rgb_img, f"X: {x:.3f} m", (centerx + 10, centery + 50), Annotator.font, Annotator.size, classColor)
-            cv2.putText(rgb_img, f"Y: {y:.3f} m", (centerx + 10, centery + 65), Annotator.font, Annotator.size, classColor)
-            cv2.putText(rgb_img, f"Z: {z:.3f} m", (centerx + 10, centery + 80), Annotator.font, Annotator.size, classColor)
-            #### annotate depth image rect
-            x1, y1, x2, y2 = m.rectDepth
-            p1, p2 = (int(x1), int(y1)), (int(x2), int(y2))
-            cv2.rectangle(depth_img, p1, p2, (255,255,255), 2)
+            rgb_img = Annotator.drawMatchRgb(rgb_img, m)
+            depth_img = Annotator.drawMatchDepth(depth_img, m)
         return rgb_img, depth_img
     @staticmethod
     def drawPrediction(rgb, label, box, color=(128, 128, 128), txt_color=(255, 255, 255), lw=1):
@@ -162,6 +172,14 @@ class Annotator:
         # cv2.rectangle(rgb_img, p1, p2, color, thickness, cv2.LINE_AA)
         cv2.rectangle(depth_img, p1, p2, color, thickness, cv2.LINE_AA)
         return rgb_img, depth_img
+    @staticmethod
+    def drawTracks(rgb, objectDict):
+        rgb_img = rgb.copy()
+        obj : KalmanObject
+        for id, obj in objectDict.items():
+            ratio = obj.calculateRatio()
+            rgb_img = Annotator.drawMatchRgb(rgb_img, obj, extraStr=f'{ratio:.2f}')
+        return rgb_img
 #############################################################################################                  
 def centerFromRect(rect):
     p1, p2 = (int(rect[0]), int(rect[1])), (int(rect[2]), int(rect[3]))
@@ -191,6 +209,7 @@ class InferenceRosNode(Node):
         self.declare_parameter('pixel_match_threshold', 200)   
         self.declare_parameter('prediction_score_treshold', 0.2)   
         self.declare_parameter('detection_score_treshold', 0.2)   
+        self.declare_parameter('tracking_association_dist_threshold', 1.0)   
         # configPath = self.get_parameter('model_config').get_parameter_value().string_value
         self.visualize = self.get_parameter('visualize').get_parameter_value().bool_value
         modelCheckpoint = self.get_parameter('model_checkpoint').get_parameter_value().string_value
@@ -200,11 +219,13 @@ class InferenceRosNode(Node):
         self.pixel_match_threshold = self.get_parameter('pixel_match_threshold').get_parameter_value().integer_value
         self.prediction_score_treshold = self.get_parameter('prediction_score_treshold').get_parameter_value().double_value
         self.detection_score_treshold = self.get_parameter('detection_score_treshold').get_parameter_value().double_value
+        self.tracking_association_dist_threshold = self.get_parameter('tracking_association_dist_threshold').get_parameter_value().double_value
         #################################################
         ### Create publishers/subscribers for the two image topics
         if self.visualize:
             self.rgb_pub = self.create_publisher(Image, '~/rgb/labeled', 1)
             self.depth_pub = self.create_publisher(Image, '~/depth/colored', 1)
+            self.tracks_pub = self.create_publisher(Image, '~/tracks/colored', 1)
         self.rgb_sub = Subscriber(self, Image, rgb_topic)
         self.depth_sub = Subscriber(self, Image, depth_topic)
         self.nn_sub = Subscriber(self, SpatialDetectionArray, nn_topic)
@@ -228,14 +249,17 @@ class InferenceRosNode(Node):
         #################################################
         ### misc
         self.bridge = cv_bridge.CvBridge()
-        self.rgb_buf = []
-        self.depth_buf = []        
+        self.tracker = KalmanGestureTracker(distance_threshold=self.tracking_association_dist_threshold) 
+    def destroy_node(self):
+        self.inference.stop()
+        super().destroy_node()    
     def image_callback(self, rgb_msg, depth_msg, nn_msg):
         self.get_logger().debug('Synchronized images received')
         rgb0 = self.bridge.imgmsg_to_cv2(rgb_msg, "bgr8")
         depth0 = self.bridge.imgmsg_to_cv2(depth_msg, "passthrough")
         ### prepare images 
-        rgb_rescaled, rgb_input = self.model.transformInputRgb(rgb0)
+        rgb_rescaled0, rgb_input = self.model.transformInputRgb(rgb0)
+        rgb_rescaled = rgb_rescaled0.copy()
         depth = self.model.transformInputDepth(depth0) ## will be colored
         ###
         self.inference.setInputs(rgb_input)
@@ -262,14 +286,20 @@ class InferenceRosNode(Node):
                 x,y,z = (detectedObject.x, detectedObject.y, detectedObject.z)
                 m = Match(cls, classname, conf, rgbRect, depthRect, (x,y,z))
                 matches.append(m)
-        ### annotate and visualize 
+        ### annotate and visualize
         if self.visualize:
             rgb_rescaled, depth = Annotator.drawMatches(rgb_rescaled, depth, matches)
+        ### track gestures
+        self.trackGestures(matches)
+        rgb_tracked = rgb_rescaled0.copy()
+        rgb_tracked = Annotator.drawTracks(rgb_tracked, self.tracker.get_all_objects())
         ### publish output images containing last available model output
         rgb_img_msg = self.bridge.cv2_to_imgmsg(rgb_rescaled, "bgr8")
         depth_img_msg = self.bridge.cv2_to_imgmsg(depth, "bgr8")
+        track_img_msg = self.bridge.cv2_to_imgmsg(rgb_tracked, "bgr8")
         self.rgb_pub.publish(rgb_img_msg)
         self.depth_pub.publish(depth_img_msg)
+        self.tracks_pub.publish(track_img_msg)
     def parseNNMsg(self, msg : SpatialDetectionArray) -> OakDDetections:
         ### parse detections
         extracted = []
@@ -291,9 +321,14 @@ class InferenceRosNode(Node):
                                                personResult.score, 
                                                (detection.position.x, detection.position.y, detection.position.z)))
         return OakDDetections(extracted)
-    def destroy_node(self):
-        self.inference.stop()
-        super().destroy_node()
+    def trackGestures(self, matches):
+        m : Match
+        self.tracker.update(matches)
+    def publishgestures(self):
+        humans = []
+        # for 
+        # msg = FollowMeHumanList(humans = FollowMeHuman)
+        # msg.humans
 #############################################################################################
 def main(args=None):
     rclpy.init(args=args)

@@ -1,3 +1,13 @@
+### usage ros
+
+```
+ros2 launch YOLOV5_Gestures inference_ros.launch.py camera_model:=OAK-D
+
+or 
+
+ros2 launch YOLOV5_Gestures inference_ros.launch.py camera_model:=OAK-D-W
+```
+
 # 毕设系列-基于YOLOV5的手势识别系统
 
 我们之前做过一期基于Yolov5的口罩检测系统（[手把手教你使用YOLOV5训练自己的目标检测模型-口罩检测-视频教程_dejahu的博客-CSDN博客](https://blog.csdn.net/ECHOSON/article/details/121939535)），里面的代码是基于YOLOV5 6.0开发的，并且是适用其他数据集的，只需要修改数据集之后重新训练即可，非常方便，但是有些好兄弟是初学者，可能不太了解数据的处理，所以我们就这期视频做个衍生系列，主要是希望通过这些系列来教会大家如何训练和使用自己的数据集。
