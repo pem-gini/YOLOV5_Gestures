@@ -174,6 +174,11 @@ def generate_launch_description():
             }]
     )
 
+    oak_z = 1.0
+    trafoParams = ["--x", "0.00",   "--y", "-0.0",   "--z", "%s"%oak_z,     "--roll","-0.0" ,   "--pitch", "0.0" , "--yaw", "0.0", "--frame-id", "base_link", "--child-frame-id", "oak-d-base-frame"]
+    base_link_trafo = launch_ros.actions.Node(package='tf2_ros', executable='static_transform_publisher', name='trafo1', arguments = trafoParams)
+
+
     # rviz_node = launch_ros.actions.Node(
     #         package='rviz2', executable='rviz2', output='screen',
     #         arguments=['--display-config', default_rviz])
@@ -206,7 +211,8 @@ def generate_launch_description():
     ld.add_action(tracker_yolov4_spatial_node)
     ld.add_action(inference_node)
 
-    #ld.add_action(urdf_launch)
+    ld.add_action(urdf_launch)
+    ld.add_action(base_link_trafo)
 
     return ld
 

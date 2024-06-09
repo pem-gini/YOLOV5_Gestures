@@ -3,6 +3,7 @@ from filterpy.kalman import KalmanFilter
 from filterpy.common import Q_discrete_white_noise
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
+import time
 
 class KalmanObject:
     def __init__(self, obj):
@@ -25,6 +26,8 @@ class KalmanObject:
         self.lifecycles = 1
         self.misscycles = 0
         self.updated = True
+        self.startTime = time.time()
+        self.trackedTime = 0.0
 
     def get(self):
         return self.kf.x.tolist()
@@ -34,6 +37,7 @@ class KalmanObject:
 
     def tick(self):
         self.lifecycles = self.lifecycles + 1
+        self.trackedTime += time.time() - self.startTime
 
     def update(self, obj):
         ## set other kwargs from dict
@@ -49,7 +53,7 @@ class KalmanObject:
         return self.hitcycles / self.lifecycles
     
     def __repr__(self):
-        return f" - (prob={self.calculateRatio()} |-- {self.misscycles}, x={self.kf.x[0]}, y={self.kf.x[1]}, z={self.kf.x[2]})"
+        return f" - (time={self.trackedTime}, prob={self.calculateRatio()} |-- {self.misscycles}, x={self.kf.x[0]}, y={self.kf.x[1]}, z={self.kf.x[2]})"
 
 
 class KalmanGestureTracker:

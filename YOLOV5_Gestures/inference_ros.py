@@ -1,6 +1,8 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
+from std_msgs.msg import Header
+from geometry_msgs.msg import PoseStamped, Pose, Point
 from depthai_ros_msgs.msg import SpatialDetectionArray, SpatialDetection
 from vision_msgs.msg import ObjectHypothesis
 from message_filters import ApproximateTimeSynchronizer, Subscriber
@@ -27,11 +29,12 @@ from YOLOV5_Gestures.utils.plots import colors
 from YOLOV5_Gestures.utils.gestureTracker import KalmanGestureTracker, KalmanObject
 #############################################################################################
 class OakDDetection:
-    def __init__(self, center, size, conf, xyz):
+    def __init__(self, center, size, conf, xyz, header):
         self.center = center
         self.size_x, self.size_y = size
         self.confidence =  conf
         self.x, self.y, self.z = xyz
+        self.header = header
         ### bounding box
         self.xmin, self.ymin, self.xmax, self.ymax = calculateRectEdges(center, size)
     def __repr__(self) -> str:
@@ -46,7 +49,7 @@ class OakDDetections:
         detection : OakDDetection
         for i, detection in enumerate(self.detections):
             pass
-    def matchPointToClosestDetection(self, point):
+    def matchPointToClosestDetection(self, point) -> tuple[int, float, OakDDetection, list, list]:
         rects = [(((d.xmin, d.ymin, d.xmax, d.ymax), d)) for d in self.detections]
         depthrects = [(((d.xmin, d.ymin, d.xmax, d.ymax), d)) for d in self.detections]
         index, closest_dist, detectedObject = find_closest_rectangle(point, rects)
@@ -59,13 +62,14 @@ class OakDDetections:
     def __repr__(self) -> str:
         return "%s" % [str(x) for x in self.detections] 
 class Match:
-    def __init__(self, cls, classname, conf, rectRgb, rectDepth, xyz):
+    def __init__(self, cls, classname, conf, rectRgb, rectDepth, xyz, header):
         self.cls = cls
         self.classname = classname
         self.conf = conf
         self.rectRgb = rectRgb
         self.rectDepth = rectDepth
         self.x, self.y, self.z = xyz
+        self.header = header
     def __repr__(self) -> str:
         return str(self.__dict__)
 
@@ -111,7 +115,7 @@ class Annotator:
     # textcolor = (0,255,0)
     @staticmethod
     def drawMatchRgb(rgb_img, m, extraStr=""):
-        label = f'{m.classname} {m.conf:.2f}'
+        label = f'{m.cls} {m.classname} {m.conf:.2f}'
         if extraStr:
             label += " | %s" % extraStr
         classColor = colors(m.cls, True)
@@ -176,9 +180,15 @@ class Annotator:
     def drawTracks(rgb, objectDict):
         rgb_img = rgb.copy()
         obj : KalmanObject
+        ### also draw hypotheses information on the image
+        lines = ["TrackedObjetcs: %s" % len(objectDict.items())]
         for id, obj in objectDict.items():
             ratio = obj.calculateRatio()
             rgb_img = Annotator.drawMatchRgb(rgb_img, obj, extraStr=f'{ratio:.2f}')
+            lines.append(" - %s: %s" % (id, obj.classname))
+        ### draw multiline
+        for i, line in enumerate(lines):
+            cv2.putText(rgb_img, line, (10, 30 + 30*i), 0, 1, (0,0,0), thickness=2, lineType=cv2.LINE_AA)
         return rgb_img
 #############################################################################################                  
 def centerFromRect(rect):
@@ -222,6 +232,7 @@ class InferenceRosNode(Node):
         self.tracking_association_dist_threshold = self.get_parameter('tracking_association_dist_threshold').get_parameter_value().double_value
         #################################################
         ### Create publishers/subscribers for the two image topics
+        self.human_gesture_pub = self.create_publisher(FollowMeHumanList, '/gestures', 1)
         if self.visualize:
             self.rgb_pub = self.create_publisher(Image, '~/rgb/labeled', 1)
             self.depth_pub = self.create_publisher(Image, '~/depth/colored', 1)
@@ -277,6 +288,7 @@ class InferenceRosNode(Node):
         ### for every prediction, match the closest oak detection
         matches = []
         for rect, conf, cls in predictions:
+            conf = conf.item()
             classname = self.model.lookupName(cls)
             center = centerFromRect(rect)
             if self.visualize:
@@ -284,7 +296,7 @@ class InferenceRosNode(Node):
             index, closest_dist, detectedObject, rgbRect, depthRect = detections.matchPointToClosestDetection(center)
             if closest_dist < self.pixel_match_threshold and conf > self.prediction_score_treshold:
                 x,y,z = (detectedObject.x, detectedObject.y, detectedObject.z)
-                m = Match(cls, classname, conf, rgbRect, depthRect, (x,y,z))
+                m = Match(cls, classname, conf, rgbRect, depthRect, (x,y,z), detectedObject.header)
                 matches.append(m)
         ### annotate and visualize
         if self.visualize:
@@ -300,9 +312,11 @@ class InferenceRosNode(Node):
         self.rgb_pub.publish(rgb_img_msg)
         self.depth_pub.publish(depth_img_msg)
         self.tracks_pub.publish(track_img_msg)
+        self.publishgestures()
     def parseNNMsg(self, msg : SpatialDetectionArray) -> OakDDetections:
         ### parse detections
         extracted = []
+        header = msg.header
         detection:SpatialDetection
         for detection in msg.detections:
             ### only take tracked objects instead of new or lost ones
@@ -319,16 +333,32 @@ class InferenceRosNode(Node):
                 extracted.append(OakDDetection((detection.bbox.center.position.x, detection.bbox.center.position.y),
                                                (detection.bbox.size_x, detection.bbox.size_y), 
                                                personResult.score, 
-                                               (detection.position.x, detection.position.y, detection.position.z)))
+                                               (detection.position.x, detection.position.y, detection.position.z),
+                                               header))
         return OakDDetections(extracted)
     def trackGestures(self, matches):
-        m : Match
-        self.tracker.update(matches)
+        ### create extra association func for differentiating classes
+        extraAssociationFunc = lambda old, new: old.cls == new.cls
+        ### update tracker with new measurements
+        self.tracker.update(matches, f=extraAssociationFunc)
     def publishgestures(self):
         humans = []
-        # for 
-        # msg = FollowMeHumanList(humans = FollowMeHuman)
-        # msg.humans
+        obj : KalmanObject
+        for id, obj in self.tracker.get_all_objects().items():
+            ratio = obj.calculateRatio()
+            ### define publish criteria for gestures
+            # if obj.lifecycles > 20 and ratio > 0.5:
+            header = Header(stamp=self.get_clock().now().to_msg(), frame_id=obj.header.frame_id)
+            gesture = FollowMeGesture(id=obj.cls, name=obj.classname, confidence=obj.conf)
+            position = Point(x=obj.x, y=obj.y, z=obj.z)
+            pose = Pose(position=position)
+            poseStamped = PoseStamped(header=header, pose=pose)
+            human = FollowMeHuman(header=obj.header, 
+                                    is_tracked=True, tracked_time=obj.trackedTime, confidence=ratio, 
+                                    pose=poseStamped, gesture=gesture)
+            humans.append(human)
+        msg = FollowMeHumanList(humans=humans)
+        self.human_gesture_pub.publish(msg)
 #############################################################################################
 def main(args=None):
     rclpy.init(args=args)

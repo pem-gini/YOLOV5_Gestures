@@ -13,53 +13,6 @@ from YOLOV5_Gestures.utils.general import (LOGGER, check_file, check_img_size, c
                            increment_path, non_max_suppression, print_args, scale_coords, strip_optimizer, xyxy2xywh)
 from YOLOV5_Gestures.utils.plots import Annotator, colors
 
-
-# class OakDDetections:
-#     def __init__(self, rgb, depth, detections):
-#         self.detections = detections
-#         self.rects = []
-#         self.depthRects = []
-#         height, width, dim = rgb.shape
-#         for detection in self.detections:
-#             if detection.label != 0: #person
-#                 continue
-#             if detection.confidence < 10:
-#                 continue
-#             roiData = detection.boundingBoxMapping
-#             roi = roiData.roi
-#             roi = roi.denormalize(depth.shape[1], depth.shape[0])
-#             topLeft = roi.topLeft()
-#             bottomRight = roi.bottomRight()
-#             #depth
-#             xmin = int(topLeft.x)
-#             ymin = int(topLeft.y)
-#             xmax = int(bottomRight.x)
-#             ymax = int(bottomRight.y)
-#             self.depthRects.append((xmin, ymin, xmax, ymax))
-#             # rgb
-#             # Denormalize bounding box
-#             x1 = int(detection.xmin * width)
-#             x2 = int(detection.xmax * width)
-#             y1 = int(detection.ymin * height)
-#             y2 = int(detection.ymax * height)
-#             self.rects.append(((x1, y1, x2, y2), detection))
-#     def find_closest_rectangle(self, point):
-
-#                         OakDDetections(rgb, depth, oak_d_detections)
-#                         if rects:
-#                             index, closest_dist, detectedObject = find_closest_rectangle(center, rects)
-#                             if closest_dist < 300:
-#                                 x1 = center[0]
-#                                 y1 = center[1]
-#                                 cv2.putText(im0, "{:.2f}".format(detectedObject.confidence), (x1 + 10, y1 + 35), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,0,255))
-#                                 cv2.putText(im0, f"X: {int(detectedObject.spatialCoordinates.x)} mm", (x1 + 10, y1 + 50), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,255,0))
-#                                 cv2.putText(im0, f"Y: {int(detectedObject.spatialCoordinates.y)} mm", (x1 + 10, y1 + 65), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,255,0))
-#                                 cv2.putText(im0, f"Z: {int(detectedObject.spatialCoordinates.z)} mm", (x1 + 10, y1 + 80), cv2.FONT_HERSHEY_TRIPLEX, 0.75, (0,255,0))
-#                         if depthRects:
-#                             for xmin, ymin, xmax, ymax in depthRects:
-#                                 cv2.rectangle(depth0, (xmin, ymin), (xmax, ymax), (255,255,255), 2)
-#                         ##########################################################################                
-
 class ModelWrapper:
     def __init__(self, weights, device="", imgsz=640, dnn=True):
         # Load model
