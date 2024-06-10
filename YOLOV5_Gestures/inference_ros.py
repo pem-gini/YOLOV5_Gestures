@@ -114,12 +114,15 @@ class Annotator:
     size = 0.75
     # textcolor = (0,255,0)
     @staticmethod
-    def drawMatchRgb(rgb_img, m, extraStr=""):
+    def drawMatchRgb(rgb_img, m, overwritePosition=None, extraStr=""):
         label = f'{m.cls} {m.classname} {m.conf:.2f}'
         if extraStr:
             label += " | %s" % extraStr
         classColor = colors(m.cls, True)
-        x,y,z = (m.x, m.y, m.z)
+        if overwritePosition:
+            x,y,z = overwritePosition
+        else:
+            x,y,z = (m.x, m.y, m.z)
         ### annotate rgb image rect and depth info
         center = centerFromRect(m.rectRgb)
         centerx = center[0]
@@ -184,7 +187,8 @@ class Annotator:
         lines = ["TrackedObjetcs: %s" % len(objectDict.items())]
         for id, obj in objectDict.items():
             ratio = obj.calculateRatio()
-            rgb_img = Annotator.drawMatchRgb(rgb_img, obj, extraStr=f'{ratio:.2f}')
+            x,y,z = obj.get()
+            rgb_img = Annotator.drawMatchRgb(rgb_img, obj, overwritePosition=(x,y,z), extraStr=f'{ratio:.2f}')
             lines.append(" - %s: %s" % (id, obj.classname))
         ### draw multiline
         for i, line in enumerate(lines):
@@ -348,9 +352,10 @@ class InferenceRosNode(Node):
             ratio = obj.calculateRatio()
             ### define publish criteria for gestures
             # if obj.lifecycles > 20 and ratio > 0.5:
+            x,y,z = track_position = obj.get()
             header = Header(stamp=self.get_clock().now().to_msg(), frame_id=obj.header.frame_id)
             gesture = FollowMeGesture(id=obj.cls, name=obj.classname, confidence=obj.conf)
-            position = Point(x=obj.x, y=obj.y, z=obj.z)
+            position = Point(x=x, y=y, z=z)
             pose = Pose(position=position)
             poseStamped = PoseStamped(header=header, pose=pose)
             human = FollowMeHuman(header=obj.header, 
